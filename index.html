@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PlayRoom</title><style>
+*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,Arial;background:#10131a;color:#f4f7fb;min-height:100vh}
+main{max-width:760px;margin:auto;padding:28px 18px}.brand{font-size:34px;font-weight:900;letter-spacing:-1px}.sub{color:#9ca7b8;margin:4px 0 28px}
+.card{background:#191e28;border:1px solid #2b3342;border-radius:22px;padding:22px;margin:14px 0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+input,select,button{width:100%;min-height:48px;border-radius:13px;border:1px solid #354052;padding:12px 14px;font-size:16px}
+input,select{background:#10141c;color:#fff}button{background:#5b6cff;color:white;border:0;font-weight:800;cursor:pointer}button.secondary{background:#252c39}button:disabled{opacity:.5}
+h1,h2,h3{margin-top:0}.hidden{display:none}.muted{color:#9ca7b8}.players{display:flex;flex-wrap:wrap;gap:8px}.pill{background:#252c39;border-radius:999px;padding:8px 12px}.game{border:1px solid #30394a;padding:15px;border-radius:16px;margin:8px 0;cursor:pointer}.game.selected{border-color:#7180ff;background:#20263b}.word{font-size:42px;font-weight:900;text-align:center;margin:20px 0}.emoji{font-size:70px;text-align:center}.row{display:flex;gap:10px}.row>*{flex:1}.notice{padding:12px;border-radius:12px;background:#242b38;color:#dbe2ed}.danger{background:#3a2228}.success{background:#1f3a2a}@media(max-width:560px){.grid{grid-template-columns:1fr}.row{flex-direction:column}.brand{font-size:29px}}
+</style></head><body><main>
+<div class="brand">PLAYROOM</div><div class="sub">Real-life party games • Made by Abdullah Al-Dalki</div>
+<section id="home" class="card"><h2>Welcome</h2><p class="muted">Enter your name to join the room.</p><input id="name" maxlength="20" placeholder="Your name"><div class="grid" style="margin-top:12px"><button id="create">Create Room</button><button class="secondary" id="showJoin">Join Room</button></div><div id="joinBox" class="hidden" style="margin-top:12px"><input id="code" maxlength="6" placeholder="Room code"><button id="join" style="margin-top:10px">Join</button></div><p id="homeMsg" class="muted"></p></section>
+
+<section id="room" class="hidden">
+<div class="card"><div class="row"><div><h2>Room <span id="roomCode"></span></h2><div class="muted">Share this code with everyone.</div></div><div><button class="secondary" id="copy">Copy Code</button></div></div></div>
+<div class="card"><h3>Players</h3><div id="players" class="players"></div></div>
+<div id="hostPanel" class="card hidden"><h3>Choose a game</h3><div id="games"></div><select id="category"></select><button id="start" style="margin-top:12px">Start Game</button></div>
+<div id="gamePanel" class="card hidden"></div>
+</section>
+<p id="err" class="muted"></p>
+</main>
+<script>
+const $=id=>document.getElementById(id);let ws,me,room,games={};
+function connect(){ws=new WebSocket((location.protocol==="https:"?"wss://":"ws://")+location.host+"/ws");
+ws.onmessage=e=>{const m=JSON.parse(e.data); if(m.type==="hello")games=m.games;
+if(m.type==="joined")me=m.me;if(m.type==="room"){room=m;renderRoom()}if(m.type==="secret")showSecret(m);if(m.type==="result")showResult(m);if(m.type==="error")$("err").textContent=m.message};
+ws.onclose=()=>$("err").textContent="Connection lost. Refresh to reconnect."}
+function name(){return $("name").value.trim()||"Player"}
+function ensure(){if(!ws||ws.readyState!==1){connect();setTimeout(()=>{},100)}}
+$("create").onclick=()=>{ensure();setTimeout(()=>ws.send(JSON.stringify({type:"create",name:name()})),150)}
+$("showJoin").onclick=()=>$("joinBox").classList.toggle("hidden");
+$("join").onclick=()=>{ensure();setTimeout(()=>ws.send(JSON.stringify({type:"join",name:name(),code:$("code").value})),150)}
+$("copy").onclick=()=>{navigator.clipboard?.writeText(room.code);$("copy").textContent="Copied!"}
+function renderRoom(){ $("home").classList.add("hidden");$("room").classList.remove("hidden");$("roomCode").textContent=room.code;
+$("players").innerHTML=room.players.map(p=>`<span class="pill">${esc(p.name)}${p.id===room.host?" ★":""}</span>`).join("");
+if(room.host===me&&room.phase==="lobby"){$("hostPanel").classList.remove("hidden");renderGames()}else $("hostPanel").classList.add("hidden");
+if(room.phase==="lobby"){$("gamePanel").classList.add("hidden")}
+}
+function renderGames(){let keys=Object.keys(games);$("games").innerHTML=keys.map(k=>`<div class="game ${room.game===k?"selected":""}" data-game="${k}"><b>${games[k].name}</b><div class="muted">${games[k].categories.join(" • ")}</div></div>`).join("");
+document.querySelectorAll(".game").forEach(x=>x.onclick=()=>{ws.send(JSON.stringify({type:"setGame",game:x.dataset.game,category:$("category").value}));});
+let cats=games[room.game]?.categories||[];$("category").innerHTML=cats.map(c=>`<option>${c}</option>`).join("");$("category").value=room.category;
+$("category").onchange=()=>ws.send(JSON.stringify({type:"setGame",game:room.game,category:$("category").value}));
+$("start").onclick=()=>ws.send(JSON.stringify({type:"start"}));
+}
+function showSecret(m){$("gamePanel").classList.remove("hidden");$("gamePanel").innerHTML=`<h2>Who Is The Imposter?</h2><div class="notice">Look at your screen privately. Do not show your phone to anyone.</div><div class="emoji">${m.emoji}</div><div class="word">${m.imposter?"YOU ARE THE IMPOSTER":"Secret word: "+esc(m.word)}</div>${m.imposter?'<p class="muted">Listen carefully and try to figure out the secret word.</p>':''}<hr><h3>Vote</h3><div id="vote"></div>`;
+$("vote").innerHTML=room.players.filter(p=>p.id!==me).map(p=>`<button class="secondary" data-v="${p.id}" style="margin:5px 0">${esc(p.name)}</button>`).join("");
+document.querySelectorAll("[data-v]").forEach(b=>b.onclick=()=>{ws.send(JSON.stringify({type:"vote",target:b.dataset.v}));b.disabled=true;b.textContent="Vote sent";});
+}
+function showResult(m){$("gamePanel").classList.remove("hidden");$("gamePanel").innerHTML=`<h2>Round Result</h2><div class="notice ${m.found?"success":"danger"}">${m.found?"The Imposter was caught!":"The Imposter escaped!"}</div><div class="emoji">${m.emoji||"🎭"}</div><div class="word">${esc(m.word||"")}</div><p>The Imposter was <b>${esc(m.imposter||"")}</b>.</p>${room.host===me?'<button id="restart">Play Again</button>': '<p class="muted">Waiting for the host to start another round.</p>'}`;
+if($("restart"))$("restart").onclick=()=>ws.send(JSON.stringify({type:"restart"}));
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+connect();
+</script></body></html>
